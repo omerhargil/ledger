@@ -2282,7 +2282,7 @@ function GoalsView({ classes, mode, accent, weighted, goals, setGoals, prefs, to
   );
 }
 
-function NavBar({ view, setView, mode, accent, gpa }) {
+function NavBar({ view, setView, mode, accent, gpa, freshCount }) {
   const items = [
     { id: "dashboard", label: "Classes", icon: BookOpen },
     { id: "timeline", label: "Timeline", icon: TrendingUp },
@@ -2315,6 +2315,7 @@ function NavBar({ view, setView, mode, accent, gpa }) {
               color: active ? ink : sub,
             }}>
               <it.icon size={14} /> {it.label}
+              {it.id === "dashboard" && freshCount > 0 && view !== "class" && <FreshDot n={freshCount} size={15} style={{ border: "none", boxShadow: "none", marginLeft: 2 }} />}
             </button>
           );
         })}
@@ -2332,7 +2333,7 @@ function NavBar({ view, setView, mode, accent, gpa }) {
   );
 }
 
-function ClassCard({ cls, mode, accent, onOpen, onEditMeta }) {
+function ClassCard({ cls, mode, accent, onOpen, onEditMeta, freshCount }) {
   const { pct } = classPercent(cls);
   const g = gradeFor(cls, pct);
   const spark = classSparkPoints(cls);
@@ -2347,6 +2348,7 @@ function ClassCard({ cls, mode, accent, onOpen, onEditMeta }) {
       borderRadius: 14, padding: "16px 16px 14px", display: "flex", flexDirection: "column", gap: 10,
       fontFamily: "'Inter', sans-serif", position: "relative",
     }}>
+      {freshCount > 0 && <FreshDot n={freshCount} style={{ position: "absolute", top: -8, left: -8, zIndex: 2 }} />}
       <button
         onClick={(e) => { e.stopPropagation(); onEditMeta(); }}
         title="Edit class"
@@ -2393,7 +2395,7 @@ function AddClassTile({ mode, accent, onClick }) {
   );
 }
 
-function Dashboard({ classes, mode, accent, weighted, onOpenClass, onEditClass, onAddClass }) {
+function Dashboard({ classes, mode, accent, weighted, onOpenClass, onEditClass, onAddClass, fresh }) {
   const sub = mode === "dark" ? "#A9A79C" : "#6B6B63";
   const ink = mode === "dark" ? "#F5F1E8" : "#2B2B26";
   return (
@@ -2409,7 +2411,8 @@ function Dashboard({ classes, mode, accent, weighted, onOpenClass, onEditClass, 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
         {classes.map((c) => (
           <ClassCard key={c.id} cls={c} mode={mode} accent={accent}
-            onOpen={() => onOpenClass(c.id)} onEditMeta={() => onEditClass(c.id)} />
+            onOpen={() => onOpenClass(c.id)} onEditMeta={() => onEditClass(c.id)}
+            freshCount={((fresh || {})[nameKey(c.name)] || []).length} />
         ))}
         <AddClassTile mode={mode} accent={accent} onClick={onAddClass} />
       </div>
@@ -2420,7 +2423,7 @@ function Dashboard({ classes, mode, accent, weighted, onOpenClass, onEditClass, 
   );
 }
 
-function AssignmentRow({ a, cat, mode, accent, onEdit, onDelete, onToggle }) {
+function AssignmentRow({ a, cat, mode, accent, onEdit, onDelete, onToggle, isNew }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(a.earned));
   const ink = mode === "dark" ? "#F5F1E8" : "#2B2B26";
@@ -2444,7 +2447,14 @@ function AssignmentRow({ a, cat, mode, accent, onEdit, onDelete, onToggle }) {
     }}>
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 13, color: ink, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
+          {isNew && <FreshDot size={9} style={{ border: "none", boxShadow: "none", flex: "none" }} />}
           <span style={{ textDecoration: strike }}>{a.name}</span>
+          {isNew && (
+            <span style={{
+              fontSize: 9.5, color: "#E5392B", border: "1px solid #E5392B77", borderRadius: 10, padding: "1px 6px",
+              fontFamily: "'Inter', sans-serif", fontWeight: 700, letterSpacing: 0.3,
+            }}>NEW</span>
+          )}
           {a.excluded && (
             <span style={{
               fontSize: 9.5, color: sub, border: `1px solid ${sub}77`, borderRadius: 10, padding: "1px 6px",
@@ -2581,7 +2591,7 @@ function AddAssignment({ cats, mode, accent, onAdd }) {
   );
 }
 
-function ClassView({ cls, mode, accent, onBack, onUpdateClass }) {
+function ClassView({ cls, mode, accent, onBack, onUpdateClass, newNames }) {
   const { pct, perCat } = classPercent(cls);
   const g = gradeFor(cls, pct);
   const ink = mode === "dark" ? "#F5F1E8" : "#2B2B26";
@@ -2673,6 +2683,7 @@ function ClassView({ cls, mode, accent, onBack, onUpdateClass }) {
           <AssignmentRow
             key={a.id} a={a} cat={cls.categories.find((c) => c.id === a.catId)}
             mode={mode} accent={accent} onEdit={editScore} onDelete={removeAssignment} onToggle={toggleExcluded}
+            isNew={!!newNames && newNames.includes(nameKey(a.name))}
           />
         ))}
         <AddAssignment cats={cls.categories} mode={mode} accent={accent} onAdd={addAssignment} />
@@ -3016,6 +3027,46 @@ function sigOf(payload) {
 // what-if assignments you added, scores you edited (while Aeries' real score hasn't changed), and any
 // level you changed. Classes, categories and assignments that already existed keep their ids, so
 // whatever you have open stays open.
+/* ---------------------- "new grade" markers (red dots) ---------------------- */
+// When a refresh finds a newly graded or changed assignment, its class gets a red dot until you open it.
+// Markers are kept as { class name: [assignment names] } (lower-cased), in this browser only.
+const FRESH_KEY = "ledger.fresh.v1";
+const nameKey = (v) => String(v == null ? "" : v).trim().toLowerCase();
+function loadFresh() {
+  try {
+    const d = JSON.parse(localStorage.getItem(FRESH_KEY));
+    if (!d || typeof d !== "object" || Array.isArray(d)) return {};
+    const out = {};
+    for (const [k, v] of Object.entries(d).slice(0, 30)) {
+      if (Array.isArray(v)) out[k] = v.filter((x) => typeof x === "string").slice(0, 60);
+    }
+    return out;
+  } catch { return {}; }
+}
+function addFresh(prev, changes) {
+  const out = { ...prev };
+  for (const c of changes) {
+    const k = nameKey(c.className);
+    const n = nameKey(c.name);
+    const cur = out[k] || [];
+    if (k && n && !cur.includes(n)) out[k] = [...cur, n].slice(-60);
+  }
+  return out;
+}
+const freshTotal = (f) => Object.values(f).reduce((n, a) => n + a.length, 0);
+function buzz() {
+  try { if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate([35, 45, 35]); } catch { /* not supported: fine */ }
+}
+function FreshDot({ n, size = 18, style }) {
+  return (
+    <span key={n} className="ledger-dot" aria-label={n ? `${n} new` : "new"} style={{
+      minWidth: size, height: size, padding: n > 9 ? "0 4px" : 0, borderRadius: size, background: "#E5392B", color: "#fff",
+      border: "2px solid #fff", boxSizing: "content-box", display: "inline-flex", alignItems: "center", justifyContent: "center",
+      fontSize: 10, fontWeight: 700, fontFamily: "'Inter', sans-serif", lineHeight: 1, boxShadow: "0 1px 3px rgba(0,0,0,.25)", ...style,
+    }}>{n ? (n > 99 ? "99+" : n) : ""}</span>
+  );
+}
+
 function mergeRefresh(prevClasses, payload) {
   const norm = (s) => String(s).trim().toLowerCase();
   const merged = classesFromImport(payload).map((n) => {
@@ -3215,6 +3266,8 @@ export default function App() {
   useEffect(() => { setConfettiOn(prefs.confetti); }, [prefs.confetti]);
   const [view, setView] = useState("dashboard");
   const [openClassId, setOpenClassId] = useState(null);
+  const [fresh, setFresh] = useState(loadFresh); // red-dot markers: { class name: [assignment names] }
+  const [highlight, setHighlight] = useState(null); // { cls: name key, names: [..] } shown as NEW while that class is open
   const [mode, setMode] = useState(saved && saved.mode === "dark" ? "dark" : "light");
   const [accent, setAccent] = useState(saved && typeof saved.accent === "string" && /^#[0-9a-fA-F]{6}$/.test(saved.accent) ? saved.accent : ACCENTS[0].value);
   const [weighted, setWeighted] = useState(saved ? saved.weighted !== false : true);
@@ -3346,6 +3399,8 @@ export default function App() {
           const ann = announceChanges(classesRef.current, r.payload);
           if (prefsRef.current.toasts) for (const tt of ann.toasts) pushToast(tt.text, tt.tone);
           if (ann.level && prefsRef.current.confetti) launchConfetti(ann.level);
+          const freshOnes = ann.changes.filter((c) => c.kind === "new" || c.kind === "changed");
+          if (freshOnes.length) { setFresh((prev) => addFresh(prev, freshOnes)); buzz(); }
           // Always merge: it keeps your what-ifs and puts back anything real that is missing. If that changes
           // nothing, the very same list is returned and the screen is left alone.
           setClasses((prev) => {
@@ -3365,6 +3420,23 @@ export default function App() {
     window.postMessage({ type: "ledger:req-ping" }, window.location.origin);
     return () => window.removeEventListener("message", onMsg);
   }, []);
+
+  // Opening a class clears its red dot (its new rows keep a NEW tag until you leave it). Dots also go in the tab title.
+  useEffect(() => {
+    const cls = view === "class" && openClassId != null ? classes.find((c) => c.id === openClassId) : null;
+    if (!cls) { setHighlight(null); return; }
+    const key = nameKey(cls.name);
+    const pending = fresh[key];
+    if (pending && pending.length) {
+      setHighlight((h) => ({ cls: key, names: Array.from(new Set(((h && h.cls === key) ? h.names : []).concat(pending))) }));
+      setFresh((f) => { const n = { ...f }; delete n[key]; return n; });
+    }
+  }, [view, openClassId, fresh, classes]);
+  useEffect(() => {
+    try { localStorage.setItem(FRESH_KEY, JSON.stringify(fresh)); } catch { /* storage blocked: fine */ }
+    const n = freshTotal(fresh);
+    document.title = n > 0 ? `(${n}) Ledger` : "Ledger";
+  }, [fresh]);
 
   // Quiet refresh: while Ledger is open and in front, check Aeries every 10 seconds.
   const hostNow = source ? source.host : null;
@@ -3405,6 +3477,7 @@ export default function App() {
   const signOut = () => {
     try { localStorage.removeItem(DATA_KEY); } catch { /* ignore */ }
     setSource(null);
+    setFresh({});
     setClasses(seedData());
     setLoggedIn(false);
     setView("dashboard");
@@ -3482,6 +3555,9 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,600;0,700;1,600&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Caveat:wght@600;700&display=swap');
         * { box-sizing: border-box; }
         input:focus, select:focus { outline: none; box-shadow: 0 0 0 2px ${accent}55; }
+        @keyframes ledger-buzz { 0%,100% { transform: translateX(0) scale(1); } 15% { transform: translateX(-3px) rotate(-12deg) scale(1.2); } 35% { transform: translateX(3px) rotate(12deg) scale(1.2); } 55% { transform: translateX(-2px) rotate(-8deg); } 75% { transform: translateX(2px) rotate(8deg); } }
+        .ledger-dot { animation: ledger-buzz .6s ease-in-out 2; }
+        @media (prefers-reduced-motion: reduce) { .ledger-dot { animation: none; } }
       `}</style>
 
       {!loggedIn ? (
@@ -3497,7 +3573,7 @@ export default function App() {
         </>
       ) : (
         <>
-          <NavBar view={view} setView={(v) => { setView(v); setOpenClassId(null); }} mode={mode} accent={accent} gpa={gpa} />
+          <NavBar view={view} setView={(v) => { setView(v); setOpenClassId(null); }} mode={mode} accent={accent} gpa={gpa} freshCount={freshTotal(fresh)} />
           {source && (
             <div style={{ padding: "6px 18px 0", fontSize: 11, color: mode === "dark" ? "#A9A79C" : "#6B6B63", fontFamily: "'Inter', sans-serif" }}>
               Grades from {source.host || "Aeries"}{formatStamp(source)}
@@ -3521,7 +3597,7 @@ export default function App() {
             </div>
           )}
           {view === "dashboard" && (
-            <Dashboard classes={classes} mode={mode} accent={accent} weighted={weighted}
+            <Dashboard classes={classes} mode={mode} accent={accent} weighted={weighted} fresh={fresh}
               onOpenClass={(id) => { setOpenClassId(id); setView("class"); }}
               onEditClass={(id) => setEditorId(id)}
               onAddClass={() => setEditorId("new")}
@@ -3550,6 +3626,7 @@ export default function App() {
               mode={mode} accent={accent}
               onBack={() => setView("dashboard")}
               onUpdateClass={updateClass}
+              newNames={highlight && highlight.cls === nameKey((classes.find((c) => c.id === openClassId) || {}).name) ? highlight.names : null}
             />
           )}
           {view === "settings" && (
