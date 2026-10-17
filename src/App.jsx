@@ -3110,7 +3110,7 @@ function ImportPrompt({ pending, mode, accent, onApply, onCancel }) {
   const copyDebug = async () => {
     try {
       await navigator.clipboard.writeText(JSON.stringify({ ledgerImporterDebug: { version: "0.5", classes: pending.diag } }, null, 1));
-      setCopied("Copied. Paste it to Claude.");
+      setCopied("Copied.");
     } catch {
       setCopied("Couldn't copy to the clipboard.");
     }
