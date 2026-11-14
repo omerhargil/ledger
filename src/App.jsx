@@ -4,6 +4,7 @@ import {
   ChevronRight, ChevronLeft, X, Settings, Check, Pencil, Trash2,
   BookOpen, Sparkles, ArrowUpRight, Undo2, Lightbulb, Target, CalendarDays, Trophy, PartyPopper, Download, Copy, Flame, Award, Flag
 } from "lucide-react";
+import { Analytics } from "@vercel/analytics/react";
 
 /* ---------------------------------- data ---------------------------------- */
 
@@ -3667,6 +3668,7 @@ export default function App() {
           onDelete={deleteClass}
         />
       )}
+      <Analytics />
     </div>
   );
 }
